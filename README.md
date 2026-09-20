@@ -1,4 +1,4 @@
-# Vial Tracking on Industrial Accumulator Table
+# Computer Vision-based Vial Tracking on Industrial Accumulator Table
 
 A computer-vision pipeline that detects, tracks, and quality-triages glass
 vials moving across an industrial accumulator table conveyor, using classical
@@ -62,6 +62,11 @@ produced by `vial_analytics.py` from the tracker's CSV output:
   <img src="docs/images/disposition_breakdown.png" alt="Disposition breakdown bar chart" width="48%" />
   <img src="docs/images/radius_distribution.png" alt="Radius distribution histogram with the size-anomaly band shaded" width="48%" />
 </p>
+
+#### A pre-tracking and a beta version of the tracking videos of the project are available here:
+
+pre-tracking:  https://drive.google.com/file/d/1SO8cEZXsPzSqdG1jz6MzdhkGUJ7oR-_U/view
+persistent tracking: https://drive.google.com/file/d/1-YvAQbjPmpLl1IRm3iApavPd9DzurdTY/view
 
 ## What's in this repo
 
