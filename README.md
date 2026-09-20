@@ -1,8 +1,7 @@
 # Vial Tracking on Industrial Accumulator Table
 
 Computer-vision pipeline that detects, tracks, and triages glass vials moving
-across an accumulator table conveyor, reconstructed from two lost-source-code
-video artifacts using OpenCV, and extended into a production-style tracking +
+across an accumulator table conveyor using OpenCV, and extended into a production-style tracking +
 analytics pipeline.
 
 ![Persistent tracking with legible per-vial IDs and colors](docs/images/persistent_tracking_frame.png)
@@ -33,15 +32,7 @@ This project started from two video files and no source code:
 | `pre_tracking_vials.avi` | Raw top-down camera feed of glass vials on an accumulator table conveyor. 1080x1080, 12 fps, 30 frames. |
 | `post_tracking_vials.avi` | The same feed with a detection overlay (circles + ID labels) burned in. 1080x1080, 10 fps, 30 frames. |
 
-The code that produced `post_tracking_vials.avi` was lost. Everything in
-this repository was rebuilt from scratch by analyzing the two videos
-pixel-by-pixel, reproducing the detection overlay, verifying the
-reconstruction against the real footage, and then deliberately going
-*beyond* what the original apparently did — because forensic analysis
-turned up an important finding: **the original overlay was not actually
-tracking anything.** See the next section for how that was established, and
-[`vial_persistent_tracker.py`](vial_persistent_tracker.py) for the real
-tracker built to replace it.
+
 
 ## What's in this repo
 
@@ -461,6 +452,8 @@ Running the scripts (see [Usage](#usage)) will also produce, alongside the
 originals: `reconstructed_post.avi`, `persistent_tracked.avi` (+ its
 `_tracks.csv`), `persistent_tracked_watershed.avi` (+ its `_tracks.csv`),
 and an `analytics_output/` directory.
+
+You can see a beta version of the result here: https://drive.google.com/drive/home
 
 ## License
 
