@@ -1,4 +1,4 @@
-# Vial Tracking on Industrial Accumulator Table
+# Computer Vision-based Vial Tracking on Industrial Accumulator Table
 
 A computer-vision pipeline that detects, tracks, and quality-triages glass
 vials moving across an industrial accumulator table conveyor, using classical
