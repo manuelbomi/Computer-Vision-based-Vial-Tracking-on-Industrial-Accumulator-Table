@@ -1,22 +1,25 @@
 # Vial Tracking on Industrial Accumulator Table
 
-Computer-vision pipeline that detects, tracks, and triages glass vials moving
-across an accumulator table conveyor using OpenCV, and extended into a production-style tracking +
-analytics pipeline.
+A computer-vision pipeline that detects, tracks, and quality-triages glass
+vials moving across an industrial accumulator table conveyor, using classical
+OpenCV techniques end to end: detection, multi-object tracking, and
+post-tracking analytics.
 
-![Persistent tracking with legible per-vial IDs and colors](docs/images/persistent_tracking_frame.png)
+![Raw input frame next to the same frame after detection and persistent tracking, with stable per-vial IDs and colors](docs/images/before_after_tracking.png)
 
 ## Table of contents
 
 - [Background](#background)
+- [Results at a glance](#results-at-a-glance)
 - [What's in this repo](#whats-in-this-repo)
-- [How the original overlay was reverse-engineered](#how-the-original-overlay-was-reverse-engineered)
 - [Pipeline architecture](#pipeline-architecture)
 - [Installation](#installation)
-- [Usage](#usage)
+- [Quickstart with synthetic sample data](#quickstart-with-synthetic-sample-data)
+- [Using your own camera footage](#using-your-own-camera-footage)
 - [Detection algorithm comparison](#detection-algorithm-comparison-how-do-you-find-a-vial-in-a-frame)
 - [Tracking algorithm comparison](#tracking-algorithm-comparison-how-do-you-keep-an-id-on-a-vial)
 - [Post-tracking analytics](#post-tracking-analytics-from-a-csv-to-a-disposition-decision)
+- [Testing & CI](#testing--ci)
 - [Industrial applications](#industrial-applications)
 - [Camera & lighting hardware for this application](#camera--lighting-hardware-for-this-application)
 - [Known limitations & future work](#known-limitations--future-work)
@@ -25,66 +28,57 @@ analytics pipeline.
 
 ## Background
 
-This project started from two video files and no source code:
+Accumulator tables are a common buffer stage on packaging and filling lines:
+vials, bottles, or ampoules collect on a slowly moving table between an
+upstream filling/stoppering machine and a downstream
+capping/labeling/inspection station. A vision system watching that buffer can
+do three useful things without touching the mechanical line at all:
 
-| File | Contents |
-|---|---|
-| `pre_tracking_vials.avi` | Raw top-down camera feed of glass vials on an accumulator table conveyor. 1080x1080, 12 fps, 30 frames. |
-| `post_tracking_vials.avi` | The same feed with a detection overlay (circles + ID labels) burned in. 1080x1080, 10 fps, 30 frames. |
+1. **Count throughput** — how many vials passed, and how fast.
+2. **Flag a stall or jam** before it backs up (or crashes) the upstream
+   machine.
+3. **Triage obviously anomalous vials** — before they reach a certified
+   downstream inspection station.
 
+This repo implements that pipeline end to end: detect each vial in a
+top-down camera frame, track every vial with a stable identity across
+frames, and turn the resulting per-vial trajectories into throughput, jam,
+and quality-triage signals a line operator can actually act on.
 
+## Results at a glance
+
+Every image on this page is generated directly by the code in this repo,
+running against the included synthetic sample video (see
+[Quickstart](#quickstart-with-synthetic-sample-data)) — nothing here is a
+mockup. The before/after detection + tracking comparison is at the very
+top of this page; here's what the analytics stage produces from that same
+run.
+
+**Post-tracking quality-triage disposition and rim-radius distribution**,
+produced by `vial_analytics.py` from the tracker's CSV output:
+
+<p>
+  <img src="docs/images/disposition_breakdown.png" alt="Disposition breakdown bar chart" width="48%" />
+  <img src="docs/images/radius_distribution.png" alt="Radius distribution histogram with the size-anomaly band shaded" width="48%" />
+</p>
 
 ## What's in this repo
 
 | File | Purpose |
 |---|---|
-| [`vial_detection.py`](vial_detection.py) | Per-frame vial **detection** only (Hough Circle Transform). Faithfully reproduces the look of the original, lost `post_tracking_vials.avi`, including its cosmetic, non-persistent random ID labels. |
-| [`vial_persistent_tracker.py`](vial_persistent_tracker.py) | Real multi-object **tracking**: same detector, plus a centroid tracker that keeps a stable ID and a stable color on each vial across frames, and streams every observation to a CSV. |
+| [`vial_detection.py`](vial_detection.py) | Per-frame vial **detection** (Hough Circle Transform). Fast, dependency-free, no training data. |
+| [`vial_persistent_tracker.py`](vial_persistent_tracker.py) | Real multi-object **tracking**: a centroid tracker that keeps a stable ID and a stable color on each vial across frames, plus an alternative watershed-based detector for dense/touching clusters, and a CSV of every observation. |
 | [`vial_analytics.py`](vial_analytics.py) | Post-processing on that CSV: throughput counts, jam/stall alerts, and a PASS / REVIEW / REJECT quality-triage disposition per vial, plus summary charts. |
-| `pre_tracking_vials.avi`, `post_tracking_vials.avi` | The two original source videos this project was reconstructed from. |
-| `docs/images/` | Reference screenshots used in this README. |
-
-## How the original overlay was reverse-engineered
-
-1. **Confirmed both videos share the same underlying footage.** Diffing
-   non-overlay pixels between the first frame of each video gave a mean
-   absolute difference of **1.9** (out of 255) — essentially just
-   re-encoding noise. `post_tracking_vials.avi` is `pre_tracking_vials.avi`
-   with graphics drawn on top, not a separately captured clip.
-2. **Sampled the overlay's exact pixel colors.** Every ring pixel turned out
-   to be pure `(random 15-255, 0, 0)` in BGR — a random *shade of blue only*
-   — which is why some rings in the original footage look bright blue and
-   others look almost black: same hue, different brightness. Center dots
-   were fully random RGB.
-3. **Read the ID label format directly off zoomed crops.** Labels like
-   `772otw`, `999bcp`, and `4dar` decompose cleanly into an unpadded random
-   integer (1-3 digits, no leading zeros) followed by exactly 3 random
-   lowercase letters — i.e. `f"{random.randint(1,999)}{3 random letters}"`.
-4. **Checked whether the label followed a given vial across frames — it does
-   not.** Comparing consecutive frames, the same physical vial gets a
-   completely different random label every frame. So despite the project
-   being called "vial tracking," the original overlay only performed
-   *detection* (find circles in this one frame) with a cosmetic label — it
-   had no memory of "this is the same vial I saw a moment ago." This is why
-   the repo contains both `vial_detection.py` (a faithful reproduction of
-   that original, limited behavior) and `vial_persistent_tracker.py` (an
-   upgrade with real object permanence).
-5. **Validated the reconstruction visually.** Running `cv2.HoughCircles` on
-   the real `pre_tracking_vials.avi` with tuned parameters and applying the
-   overlay logic above produced an image that matches the real
-   `post_tracking_vials.avi` almost pixel-for-pixel in style and detection
-   coverage (including the same failure mode — missed detections in dense,
-   touching vial clusters):
-
-| Original (lost-code) output | This project's reconstruction |
-|---|---|
-| ![original post-tracking frame](docs/images/post_tracking_original.png) | ![reconstructed frame](docs/images/reconstruction_match.png) |
+| [`generate_sample_video.py`](generate_sample_video.py) | Synthesizes a short sample accumulator-table video so the whole pipeline can be run and demonstrated end to end without a real camera. |
+| [`tests/`](tests) | Unit tests for the tracker and the analytics logic. |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | CI: runs the unit tests and a full pipeline smoke test on every push. |
+| `docs/images/` | Reference screenshots used in this README, generated by running the pipeline in this repo. |
 
 ## Pipeline architecture
 
 ```mermaid
 flowchart TD
-    A[pre_tracking_vials.avi<br/>raw camera feed] --> B[Grayscale + median blur]
+    A[Input video<br/>top-down camera feed] --> B[Grayscale + median blur]
     B --> C{Detector}
     C -->|Hough Circle Transform<br/>vial_detection.detect_vials| D[per-frame circles<br/>x, y, radius]
     C -->|Distance transform + watershed<br/>detect_vials_watershed| D
@@ -100,41 +94,100 @@ flowchart TD
 ## Installation
 
 ```bash
-python -m pip install opencv-python numpy scipy pandas matplotlib
+git clone https://github.com/manuelbomi/Vial-Tracking-on-Industrial-Accumulator-Table.git
+cd Vial-Tracking-on-Industrial-Accumulator-Table
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-Tested on Python 3.10 with `opencv-python 4.12`, `scipy 1.15`, `pandas 2.3`,
-`matplotlib 3.10`.
+Tested on Python 3.10–3.12 with `opencv-python`, `numpy`, `scipy`, `pandas`,
+and `matplotlib` at the versions pinned in [`requirements.txt`](requirements.txt).
 
-## Usage
+## Quickstart with synthetic sample data
 
-**1. Reproduce the original (detection-only, non-persistent) overlay:**
+The repo ships a synthetic video generator so you can run the entire
+pipeline immediately, with no camera or external video file required. The
+generated clip mimics a real backlit accumulator table — including a
+touching/overlapping vial cluster, a stuck vial, and a couple of
+deliberately mis-sized vials — so every stage of the pipeline (including the
+watershed detector and every analytics disposition category) has something
+real to do.
+
+**1. Generate a sample video:**
 
 ```bash
-python vial_detection.py pre_tracking_vials.avi reconstructed_post.avi
+python generate_sample_video.py sample_vials.avi
 ```
 
-**2. Run real persistent tracking (recommended for any actual use):**
+A single raw frame from that generated clip looks like this — bright,
+backlit vial silhouettes on a dark background, matching the illumination
+style described in [Camera & lighting hardware](#camera--lighting-hardware-for-this-application):
+
+![Raw frame from the synthesized sample_vials.avi](docs/images/pre_tracking_frame.png)
+
+**2. Run detection only (no persistent identity, one detector pass per frame):**
 
 ```bash
-python vial_persistent_tracker.py pre_tracking_vials.avi persistent_tracked.avi
+python vial_detection.py sample_vials.avi detected.avi
+```
+
+**3. Run real persistent tracking (recommended for any actual use):**
+
+```bash
+python vial_persistent_tracker.py sample_vials.avi persistent_tracked.avi
 # or, for heavily touching/overlapping vials:
-python vial_persistent_tracker.py pre_tracking_vials.avi persistent_tracked.avi --watershed
+python vial_persistent_tracker.py sample_vials.avi persistent_tracked.avi --watershed
 ```
 
 This writes `persistent_tracked.avi` (annotated video) and
 `persistent_tracked_tracks.csv` (raw per-frame tracking data).
 
-**3. Turn that CSV into throughput / jam / quality-triage analytics:**
+**4. Turn that CSV into throughput / jam / quality-triage analytics:**
 
 ```bash
-python vial_analytics.py persistent_tracked_tracks.csv --out-dir analytics_output
+python vial_analytics.py persistent_tracked_tracks.csv --out-dir analytics_output --jam-max-path-px 45
 ```
 
 This writes `analytics_output/vial_disposition.csv`,
 `analytics_output/disposition_breakdown.png`, and
 `analytics_output/radius_distribution.png`, and prints an operator-readable
-summary to the console.
+summary to the console. Running it against the sample video prints
+something like:
+
+```
+Total distinct vial tracks : 39
+  PASS      : 37
+  REVIEW    : 2  (route to secondary/manual inspection)
+  REJECT    : 0  (divert before downstream filling/labeling)
+  EXCLUDED  : 0  (too few frames to trust -- detector noise)
+Population rim radius       : mean=20.77px, std=3.99px
+Average dwell time in frame : 4.88s
+
+JAM ALERTS (1 vial(s) barely moved while tracked -- possible physical jam on the table)
+```
+
+(`--jam-max-path-px` is turned up from the default in this example because
+the synthetic camera noise model produces a bit more per-frame jitter than a
+real global-shutter camera would — see [Known limitations](#known-limitations--future-work).)
+
+## Using your own camera footage
+
+Point the same commands at your own video file instead of
+`sample_vials.avi` — the pipeline doesn't care where the frames came from.
+In practice you will want to:
+
+1. Measure a handful of real vials in your footage (in pixels) and set
+   `--min-radius`/`--max-radius` accordingly (`vial_detection.py`'s
+   defaults are tuned for the synthetic sample, not your camera).
+2. Re-tune `CentroidTracker`'s `max_distance` (in `vial_persistent_tracker.py`)
+   to your camera's frame rate and belt speed — it should be a bit larger
+   than typical frame-to-frame vial motion, but smaller than the typical
+   gap between two different vials.
+3. Re-tune `vial_analytics.py`'s jam and size-anomaly thresholds against
+   several *minutes* of real footage — see the
+   [analytics section](#post-tracking-analytics-from-a-csv-to-a-disposition-decision)
+   for why a short clip isn't enough to set these safely.
 
 ## Detection algorithm comparison: how do you find a vial in a frame?
 
@@ -150,12 +203,11 @@ implements the first two and documents the rest for when you outgrow them.
 | **Contour detection + circularity filter** (`cv2.findContours` + `4*pi*area/perimeter^2` check) | Threshold, find each connected blob's outline, keep the ones whose shape is close enough to a circle. | Very simple to reason about and tune; gives you the actual blob mask (useful if you also want area/shape features, not just a circle fit). | Same touching-object weakness as Hough unless combined with watershed; circularity threshold is a blunt instrument compared to Hough's model-based voting. | No (subsumed by the watershed path, which already starts from a similar threshold step). |
 | **`cv2.SimpleBlobDetector`** | Threshold at multiple levels, group stable blobs across those levels, filter by area/circularity/convexity/inertia. | Built into OpenCV, handles some brightness variation better than a single fixed threshold, easy blob-shape filtering knobs. | Tuning six-plus filter parameters is fiddly; still fundamentally a single-object-per-blob method, so touching vials remain a problem. | No. |
 | **Template matching** | Slide a reference vial-rim image over the frame, score by normalized cross-correlation. | Trivial to implement; no calibration of geometric parameters needed if you have a good template. | Not rotation/scale invariant without generating many template variants; slow at high resolution; poor with partial occlusion — a bad fit for a dense, jumbled accumulator table. | No. |
-| **Deep learning instance segmentation** (e.g. YOLOv8-seg, Mask R-CNN) | A CNN trained on labeled vial images directly predicts a mask/box per vial, learning what occlusion, glare, and clutter look like. | By far the most robust to touching/overlapping/partially-occluded vials, varying lighting, and even non-circular defects (a model can be trained to also flag chips/cracks directly). This is what real high-throughput inspection lines increasingly use. | Needs a labeled training set and a training/maintenance workflow; needs a GPU (or a well-optimized edge accelerator) to hit real-time frame rates; far more moving parts to deploy and validate than a parameter-tuned classical CV method. | No — out of scope for a from-two-videos reconstruction, but the natural next step for a real deployment; see [Known limitations](#known-limitations--future-work). |
+| **Deep learning instance segmentation** (e.g. YOLOv8-seg, Mask R-CNN) | A CNN trained on labeled vial images directly predicts a mask/box per vial, learning what occlusion, glare, and clutter look like. | By far the most robust to touching/overlapping/partially-occluded vials, varying lighting, and even non-circular defects (a model can be trained to also flag chips/cracks directly). This is what real high-throughput inspection lines increasingly use. | Needs a labeled training set and a training/maintenance workflow; needs a GPU (or a well-optimized edge accelerator) to hit real-time frame rates; far more moving parts to deploy and validate than a parameter-tuned classical CV method. | No — the natural next step for a real deployment; see [Known limitations](#known-limitations--future-work). |
 
 **Practical takeaway:** start with Hough (fast, zero training data, easy to
 reason about). If your accumulator table runs dense enough that vials
-routinely touch — which the source footage in this repo does, in its
-denser clusters — add the watershed path for those regions, or budget for a
+routinely touch, add the watershed path for those regions, or budget for a
 trained segmentation model if missed/merged detections are costing you
 real accuracy.
 
@@ -163,11 +215,14 @@ real accuracy.
 
 Detecting circles frame-by-frame is necessary but not sufficient for
 "tracking" — you also need to decide which circle in frame *N+1*
-corresponds to which circle in frame *N*.
+corresponds to which circle in frame *N*. Here's a full-resolution frame
+of `CentroidTracker`'s output — every ring's ID and color stay the same
+vial to vial across the whole clip:
+
+![Full-resolution persistent tracking frame, one stable ID and color per vial](docs/images/persistent_tracking_frame.png)
 
 | Method | Idea | Strengths | Weaknesses | Used here? |
 |---|---|---|---|---|
-| **None (relabel every frame)** | What the original, lost code apparently did — assign a fresh random label to every detection, every frame. | Trivial to implement. | Not actually tracking: can't count unique objects, can't measure dwell time, can't detect a jam. This is the behavior `vial_detection.py` faithfully reproduces, for reference. | Yes, in `vial_detection.py` only (as a historical/compatibility reproduction). |
 | **Centroid tracker (greedy nearest-neighbor)** | Match each existing track to the closest new detection within a distance gate; age out unmatched tracks; register unmatched detections as new tracks. | Simple, fast, no extra dependencies, easy to understand and debug. Works well when objects move slowly relative to the frame rate (true here — this table moves vials slowly). | Greedy matching isn't globally optimal — can swap identities between two vials that pass close together. No motion model, so a brief full occlusion (more frames missed than `max_disappeared`) permanently loses the ID. | **Yes**, `CentroidTracker` in `vial_persistent_tracker.py`. |
 | **Hungarian-algorithm matching** (`scipy.optimize.linear_sum_assignment`) | Same idea as the centroid tracker, but solves the assignment problem exactly instead of greedily. | Globally optimal match for a given frame — removes the identity-swap failure mode of greedy matching, same distance-only cost model otherwise. | Still no motion prediction, so long occlusions still break tracks. Marginally more compute (still trivial at this scale). | No — noted as the first upgrade to make if ID swaps are observed; the swap-in point is clearly marked in `CentroidTracker.update()`. |
 | **Kalman filter per track + Hungarian matching (SORT)** | Each track predicts its next position (constant-velocity model) before matching, so matching is done against *predicted* position, not last-seen position, and a track can survive a few frames of no detection while still "believing" where the object should be. | Handles brief occlusions and faster motion much better than a bare centroid tracker; industry-standard baseline for real-time MOT. | More code/state per track; still no appearance model, so it can still swap identities between two similar, closely-spaced objects if their motion is ambiguous. | No — natural next upgrade for a faster or more crowded line; see [Known limitations](#known-limitations--future-work). |
@@ -222,34 +277,8 @@ each vial is classified as:
 - **EXCLUDED** — track too short to trust (almost certainly a detector
   blip, not a real vial); not counted as a quality judgment either way.
 
-```bash
-python vial_analytics.py persistent_tracked_tracks.csv --out-dir analytics_output
-```
-
-```
-Total distinct vial tracks : 280
-  PASS      : 162
-  REVIEW    : 116  (route to secondary/manual inspection)
-  REJECT    : 2    (divert before downstream filling/labeling)
-  EXCLUDED  : 0    (too few frames to trust -- detector noise)
-Population rim radius       : mean=23.58px, std=3.69px
-Average dwell time in frame : 1.26s
-
-JAM ALERTS (57 vials barely moved while tracked -- possible physical jam on the table)
-```
-
-![Disposition breakdown](docs/images/disposition_breakdown.png)
-![Radius distribution with the size-anomaly band shaded](docs/images/radius_distribution.png)
-
-> **On that 57-vial jam-alert count:** an accumulator table's entire job is
-> to *buffer* vials in a holding pattern before the next machine pulls them
-> in, so a lot of near-zero movement in any short clip is expected, normal
-> behavior, not evidence of 57 real jams. The 30-frame (~2.5s) sample clip
-> in this repo is too short to tell "normal buffering" apart from "actually
-> stuck" — on a real line, tune `--jam-min-frames` / `--jam-max-path-px`
-> against several *minutes* of footage, where a truly jammed vial (stuck for
-> tens of seconds) stands out from vials cycling through the buffer in the
-> ordinary way.
+See the charts in [Results at a glance](#results-at-a-glance) above for
+what this looks like on the included sample video.
 
 > **On what "quality disposition" does and doesn't mean here:** this
 > pipeline sees one thing — a circle's position and radius from a single
@@ -274,6 +303,24 @@ resulting `defect_score` column into `classify_vials()` in
 `vial_analytics.py` alongside the existing geometric flags. The
 PASS/REVIEW/REJECT routing logic doesn't need to change — only the signals
 feeding it.
+
+## Testing & CI
+
+```bash
+pytest
+```
+
+`tests/test_tracker.py` covers `CentroidTracker`'s ID assignment,
+persistence across small movement, retirement after `max_disappeared`, and
+its distance gate. `tests/test_analytics.py` covers per-vial aggregation
+(path length, dwell time) and the PASS/REVIEW/REJECT/EXCLUDED classification
+logic on constructed CSV data.
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs that suite on
+Python 3.10–3.12 on every push and pull request, then runs the full
+pipeline (sample-video generation → tracking → analytics) as an end-to-end
+smoke test, so a regression that only shows up when the stages are wired
+together gets caught too.
 
 ## Industrial applications
 
@@ -308,12 +355,13 @@ accumulator table is a common building block well beyond this one clip:
 
 ## Camera & lighting hardware for this application
 
-The source footage in this repo is monochrome, high-contrast, and clearly
-**backlit** (vial rims read as bright rings against a darker, evenly-lit
-background — that's precisely the illumination style that makes Hough
-Circle Transform and Otsu thresholding work well with minimal tuning). If
-you're specifying camera hardware for a real deployment of this kind of
-system, here's what matters and why:
+A real deployment of this kind of system should be monochrome,
+high-contrast, and **backlit** (vial rims read as bright rings against a
+darker, evenly-lit background — that's precisely the illumination style
+that makes Hough Circle Transform and Otsu thresholding work well with
+minimal tuning, and what `generate_sample_video.py` models). If you're
+specifying camera hardware for a real deployment, here's what matters and
+why:
 
 ### Interface / bus standard
 
@@ -323,10 +371,9 @@ system, here's what matters and why:
 | **USB3 Vision** | Compact setups, shorter cable runs (~a few meters without an active extender). | Very high bandwidth, low latency, lower cost, but less common in a cabinet-to-camera-far-away layout on a large machine. |
 | **CoaXPress** | High-speed / high-resolution line-scan or very fast area-scan applications. | Long cable runs at very high bandwidth over coax; higher cost, more specialized frame-grabber hardware. |
 
-A 1080x1080-class monochrome area-scan camera at 10-30 fps (roughly what
-this project's source footage looks like) comfortably fits well within
-GigE or USB3 bandwidth — no need for CoaXPress at this scale unless line
-speed increases substantially.
+A 1080p-class monochrome area-scan camera at 10-30 fps comfortably fits well
+within GigE or USB3 bandwidth — no need for CoaXPress at this scale unless
+line speed increases substantially.
 
 ### Shutter type: global, not rolling
 
@@ -340,13 +387,13 @@ as such.
 
 ### Monochrome vs. color
 
-**Monochrome is the right choice here**, matching the source footage. A
-monochrome sensor has no Bayer color filter array, so it has higher
-effective spatial resolution and better light sensitivity per pixel than a
-color sensor of the same physical resolution — and color information isn't
-useful for detecting a clear-glass rim's silhouette against a backlight
-anyway. Reserve color for a downstream station that specifically needs to
-judge liquid color/clarity or a printed label.
+**Monochrome is the right choice here.** A monochrome sensor has no Bayer
+color filter array, so it has higher effective spatial resolution and
+better light sensitivity per pixel than a color sensor of the same physical
+resolution — and color information isn't useful for detecting a clear-glass
+rim's silhouette against a backlight anyway. Reserve color for a downstream
+station that specifically needs to judge liquid color/clarity or a printed
+label.
 
 ### Lens: consider a telecentric lens
 
@@ -367,7 +414,7 @@ fine if the vision system is mainly doing presence/position/counting.
 
 | Style | What it's good for | Relevant here? |
 |---|---|---|
-| **Backlighting** (light source behind/below the object, camera looking through it) | Crisp, high-contrast silhouettes — exactly what this repo's source footage shows, and what makes simple thresholding/Hough work well. | Yes — matches the existing footage and pipeline. |
+| **Backlighting** (light source behind/below the object, camera looking through it) | Crisp, high-contrast silhouettes — exactly what this pipeline is designed around, and what makes simple thresholding/Hough work well. | Yes — matches the pipeline's assumptions. |
 | **Diffuse dome / ring lighting** (even illumination from many angles) | Reduces glare/hot-spots on curved glass; better for seeing surface features (labels, fill level) than a pure silhouette. | Complementary — useful if you add a defect-detection station downstream. |
 | **Coaxial / dark-field lighting** | Makes surface defects (scratches, chips) stand out via how they scatter light differently than an intact surface. | Needed if you extend to real optical defect detection (see the analytics section above). |
 | **Polarized lighting/filters** | Cuts specular glare/reflections off curved glass, which otherwise show up as spurious bright spots a naive detector can mistake for edges. | Worth adding if glare is causing false detections. |
@@ -413,10 +460,9 @@ managing that PC/edge box yourself.
 ## Known limitations & future work
 
 - **Detection:** Hough Circle Transform misses vials in dense, heavily
-  touching clusters (visible in this repo's own sample footage); the
-  watershed alternative recovers more of them but needs illumination
-  tuning of its own. A trained segmentation model is the most robust fix,
-  at the cost of needing labeled training data.
+  touching clusters; the watershed alternative recovers more of them but
+  needs illumination tuning of its own. A trained segmentation model is the
+  most robust fix, at the cost of needing labeled training data.
 - **Tracking:** `CentroidTracker` uses greedy nearest-neighbor matching
   with no motion model, so it can swap IDs between close, similarly-moving
   vials and permanently loses a track after `max_disappeared` consecutive
@@ -428,45 +474,44 @@ managing that PC/edge box yourself.
   it is a triage signal, not a certified defect-inspection system. See the
   "what quality disposition does and doesn't mean" callout above and the
   extension path to a real trained defect classifier.
-- **Jam-alert thresholds** were tuned by eye against one ~2.5 second sample
-  clip and should be re-tuned against real, longer footage before being
-  trusted operationally (see the jam-alert callout above).
+- **Jam-alert and size-anomaly thresholds** should be tuned against several
+  *minutes* of real footage from your own camera/line before being trusted
+  operationally — the defaults are reasonable starting points, not
+  universal constants. This matters especially for `--jam-max-path-px`,
+  since the right value depends on your camera's own positional noise
+  floor (see the note in the [Quickstart](#quickstart-with-synthetic-sample-data)).
 - **Camera assumptions:** the whole pipeline assumes a fixed, top-down,
   backlit, global-shutter monochrome camera. A different camera geometry
   or lighting style will need re-tuned (or different) detection parameters.
+- **Sample data:** `generate_sample_video.py` produces synthetic footage
+  for demonstration and testing purposes, not a substitute for validating
+  against real camera footage before any production use.
 
 ## Repository structure
 
 ```
 .
-├── vial_detection.py              # Hough-based per-frame detection (reproduces the original overlay)
+├── vial_detection.py              # Hough-based per-frame detection
 ├── vial_persistent_tracker.py     # Real multi-object tracking + CSV export
 ├── vial_analytics.py              # CSV -> throughput / jam alerts / quality disposition + charts
-├── pre_tracking_vials.avi         # Original raw source footage
-├── post_tracking_vials.avi        # Original (lost-code) detection-overlay footage
+├── generate_sample_video.py       # Synthetic sample-video generator for a runnable end-to-end demo
+├── requirements.txt
+├── tests/
+│   ├── test_tracker.py
+│   └── test_analytics.py
+├── .github/workflows/ci.yml       # Unit tests + full-pipeline smoke test on every push
 └── docs/
     └── images/                    # Screenshots used in this README
 ```
 
-Running the scripts (see [Usage](#usage)) will also produce, alongside the
-originals: `reconstructed_post.avi`, `persistent_tracked.avi` (+ its
-`_tracks.csv`), `persistent_tracked_watershed.avi` (+ its `_tracks.csv`),
-and an `analytics_output/` directory.
-
-You can see a beta version of the result here: https://drive.google.com/drive/home
+Running the scripts (see [Quickstart](#quickstart-with-synthetic-sample-data))
+will also produce, alongside the sample video: `detected.avi`,
+`persistent_tracked.avi` (+ its `_tracks.csv`), and an `analytics_output/`
+directory. These generated files are gitignored — see `.gitignore`.
 
 ## License
 
-MIT
-
-
-
----
-
-
-### Thank you for reading
-
-#### Please consider giving a star if you find the repo useful. Thank you.
+MIT — see [LICENSE](LICENSE).
 
 ---
 
@@ -486,6 +531,3 @@ Github:  https://github.com/manuelbomi
 
 ```
 [![Icons](https://skillicons.dev/icons?i=aws,azure,gcp,scala,mongodb,redis,cassandra,kafka,anaconda,matlab,nodejs,django,py,c,anaconda,git,github,mysql,docker,kubernetes&theme=dark)](https://skillicons.dev)
-
-
-

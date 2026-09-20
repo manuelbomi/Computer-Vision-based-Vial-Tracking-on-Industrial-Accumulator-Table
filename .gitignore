@@ -1,18 +1,13 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
+.venv/
 
 # Local tooling
 .claude/
 
-# Generated outputs (re-created by running the scripts -- see README Usage)
-reconstructed_post.avi
-persistent_tracked.avi
-persistent_tracked_watershed.avi
-persistent_tracked_tracks.csv
-persistent_tracked_watershed_tracks.csv
+# Generated outputs (re-created by running the scripts -- see README Quickstart)
+*.avi
+*_tracks.csv
 analytics_output/
-
-# NOTE: pre_tracking_vials.avi and post_tracking_vials.avi are intentionally
-# NOT ignored -- they are the original source footage this project was
-# reconstructed from and are referenced directly by the README.
