@@ -464,9 +464,7 @@ and an `analytics_output/` directory.
 
 ## License
 
-No license file is included yet — add one (MIT is a reasonable default for
-a project like this) before treating this repository as open for reuse by
-others.
+MIT
 
 
 
