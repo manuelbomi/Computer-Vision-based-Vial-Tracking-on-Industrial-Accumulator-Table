@@ -62,6 +62,10 @@ produced by `vial_analytics.py` from the tracker's CSV output:
   <img src="docs/images/radius_distribution.png" alt="Radius distribution histogram with the size-anomaly band shaded" width="48%" />
 </p>
 
+#### A video of the beta version of the project is available here:
+
+https://drive.google.com/file/d/1-YvAQbjPmpLl1IRm3iApavPd9DzurdTY/view
+
 ## What's in this repo
 
 | File | Purpose |
