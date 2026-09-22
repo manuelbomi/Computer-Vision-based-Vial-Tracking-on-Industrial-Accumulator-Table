@@ -37,7 +37,7 @@ do three useful things without touching the mechanical line at all:
 
 1. **Count throughput** — how many vials passed, and how fast.
 2. **Flag a stall or jam** before it backs up (or crashes) the upstream
-   machine.
+   machien.
 3. **Triage obviously anomalous vials** — before they reach a certified
    downstream inspection station.
 
